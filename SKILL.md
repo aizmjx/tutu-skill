@@ -57,11 +57,40 @@ X-API-KEY: <用户提供的 Key>
 
 ---
 
+## 可执行脚本（Claude 直接调用）
+
+本 skill 自带三个脚本，Claude 可以用 `python scripts/create_xxx.py` 直接执行，无需手写 HTTP 请求。
+
+| 脚本 | 用途 | 结果字段 |
+|---|---|---|
+| `scripts/create_comic.py` | 漫画生成 | `imageUrls[]`（每格一张）|
+| `scripts/create_article_illustration.py` | 文章配图 | `imageUrls[]` |
+| `scripts/create_image.py` | 自定义生图 | `imageUrl`（单张）|
+
+**前置要求**：Python 3 + `pip install requests`
+
+**API Key 通过环境变量传入**：
+```bash
+export SUPERTUTU_API_KEY=ak_xxxxxxxx
+python scripts/create_comic.py --content "故事内容"
+```
+
+脚本会轮询到完成并把结果以 JSON 输出到 stdout，进度日志输出到 stderr：
+```json
+{
+  "workId": "uuid",
+  "title": "AI 生成的标题",
+  "imageUrls": ["https://cdn.../1.jpg", "https://cdn.../2.jpg"]
+}
+```
+
+---
+
 ## Configuration
 
 ```
 BASE_URL = https://tutu.aizmjx.com/api/v1/openapi
-API_KEY  = YOUR_API_KEY
+API_KEY  = 从 https://sso.aizmjx.com/home/apikey 获取
 ```
 
 All requests require:
@@ -243,3 +272,39 @@ Timeout: After 5 minutes (75 polls), stop and share the workId with the user.
 ## Aspect Ratios
 
 `1:1` square · `3:4` portrait/小红书 · `4:3` landscape · `16:9` wide · `9:16` vertical
+
+---
+
+## 用户安装指引
+
+### 方法一：`claude skills add`（推荐，一行命令）
+
+```bash
+claude skills add https://github.com/aizmjx/tutu-skill
+```
+
+安装后在任何 Claude Code 对话里说"帮我生成一个漫画"即可自动触发本 skill。
+
+### 方法二：克隆到本地后添加
+
+```bash
+git clone https://github.com/aizmjx/tutu-skill ~/.claude/skills/supertutu-creator
+claude skills add ~/.claude/skills/supertutu-creator
+```
+
+### 配置 API Key（两种方式任选）
+
+**方式 A — 环境变量（推荐）**
+
+在 `~/.bashrc` 或 `~/.zshrc` 里加一行：
+```bash
+export SUPERTUTU_API_KEY=ak_你的key
+```
+
+**方式 B — 对话时告诉 Claude**
+
+直接在对话里说：`我的 SuperTuTu API Key 是 ak_xxxxxx`，Claude 会在本次会话内记住并使用。
+
+### 获取 API Key
+
+前往 [https://sso.aizmjx.com/home/apikey](https://sso.aizmjx.com/home/apikey) 登录后即可创建。
