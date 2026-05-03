@@ -18,7 +18,7 @@ poll until the results are ready.
 ## Configuration
 
 ```
-BASE_URL = http://localhost:10001/api/v1/openapi
+BASE_URL = https://tutu.aizmjx.com/api/v1/openapi
 API_KEY  = YOUR_API_KEY
 ```
 
