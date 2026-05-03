@@ -15,6 +15,22 @@ SuperTuTu is an AI creative platform for Chinese content creators. This skill le
 create comics, article illustrations, and custom images via its Open Platform API, then
 poll until the results are ready.
 
+## 第一步：检测 API Key
+
+**在做任何事之前，先确认用户有 API Key。**
+
+查看对话历史或用户是否已提供 `X-API-KEY`（格式通常为 `ak_` 开头的长字符串）。
+
+如果没有，回复：
+> 使用 SuperTuTu 创作功能需要先获取 API Key。请前往 [https://sso.aizmjx.com/home/apikey](https://sso.aizmjx.com/home/apikey) 获取，然后把 Key 发给我，我来帮你生成。
+
+拿到 Key 后，所有请求的 Header 都带上：
+```
+X-API-KEY: <用户提供的 Key>
+```
+
+---
+
 ## 使用前：收集必要信息
 
 在调用任何 API 之前，先确认用户提供了必要信息。**不要假设，直接问。**
