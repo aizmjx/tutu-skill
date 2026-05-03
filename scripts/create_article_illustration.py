@@ -29,7 +29,7 @@ except ImportError:
 
 BASE_URL = "https://tutu.aizmjx.com/api/v1/openapi"
 POLL_INTERVAL = 4
-MAX_POLLS = 75
+MAX_POLLS = 150  # 10 分钟：配图多张并发，比漫画慢
 
 VALID_STYLES = {
     "workplace", "warm_illustration", "rednote", "infographic",
@@ -59,7 +59,7 @@ def submit(content, image_count, style, aspect_ratio):
         "referenceImageUrls": [],
     }
 
-    r = requests.post(f"{BASE_URL}/article-illustration", json=body, headers=headers(), timeout=30)
+    r = requests.post(f"{BASE_URL}/article-illustration", json=body, headers=headers(), timeout=120)
     r.raise_for_status()
     data = r.json()
     if data.get("code") != 200:
@@ -86,7 +86,9 @@ def poll(work_id):
         if status == "failed":
             sys.exit("❌ 生成失败")
 
-    sys.exit(f"⏰ 超时（{MAX_POLLS * POLL_INTERVAL}s），workId={work_id}")
+    # 超时但有部分完成的 shots，优雅退出而不是报错
+    print(f"⚠️  超时（{MAX_POLLS * POLL_INTERVAL}s），workId={work_id}，返回已完成的 shots", file=sys.stderr)
+    return work
 
 
 def main():

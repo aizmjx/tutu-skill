@@ -38,7 +38,7 @@ def submit(prompt, title, aspect_ratio, seed):
     if seed is not None:
         body["seed"] = seed
 
-    r = requests.post(f"{BASE_URL}/image", json=body, headers=headers(), timeout=30)
+    r = requests.post(f"{BASE_URL}/image", json=body, headers=headers(), timeout=120)
     r.raise_for_status()
     data = r.json()
     if data.get("code") != 200:

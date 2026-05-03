@@ -40,7 +40,7 @@ def submit(content, title, shot_count, aspect_ratio, style_type_id):
     if style_type_id:
         body["styleTypeId"] = style_type_id
 
-    r = requests.post(f"{BASE_URL}/comic", json=body, headers=headers(), timeout=30)
+    r = requests.post(f"{BASE_URL}/comic", json=body, headers=headers(), timeout=120)
     r.raise_for_status()
     data = r.json()
     if data.get("code") != 200:
