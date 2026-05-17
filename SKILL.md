@@ -160,6 +160,80 @@ its Open Platform API (`/v1/openapi`) and includes 10 ready-to-run Python script
 
 ---
 
+## 🚨 查询作品状态的强制汇报规则
+
+**绝大多数漫画 / 配图是多张图**（4 张、8 张），生图是**异步并发**的：第 1 张可能 30 秒就好，
+第 4 张可能 2 分钟。所以"查作品状态"的响应里，一定要分清三种状态：
+
+```
+work.status       — 整 work 状态：generating / completed / failed
+shots[].status    — 每张图的状态：generating / ready / completed / failed
+shots[].imageUrl  — 仅 completed 时才有值
+```
+
+### ❌ 错误模式（看到第一张图就说"好了"）
+
+```
+用户：我那个漫画好了吗？
+Claude（错误做法）：调 GET /work/{workId} → 看到 shots[0].imageUrl 有值
+                    → 回复"图好了，链接是 https://..."
+
+实际情况：work.status 还是 generating，shots[1..3] 还在生成，
+         用户只拿到 1 张图就以为搞定了。
+```
+
+### ✅ 正确模式（强制用 check_work.py）
+
+**任何"查作品状态"类指令必须用 `check_work.py`**，绝不裸调 `GET /work/{workId}`。
+脚本会把响应汇总成 `summary` 结构：
+
+```json
+{
+  "status":    "generating",
+  "summary":   {"total": 4, "completed": 2, "generating": 2, "ready": 0, "failed": 0},
+  "isAllDone": false,
+  "imageUrls": ["https://.../1.jpg", "https://.../2.jpg"],
+  "advice":    "⏳ 还有 2 张在生成中（2/4 已完成），建议 60 秒后再查；或加 --wait 等到全部完成"
+}
+```
+
+### 汇报模板
+
+拿到 `check_work.py` 输出后，**按 `isAllDone` 和 `summary` 决定怎么回复用户**：
+
+**全部完成 (`isAllDone: true`)**：
+> ✅ 你的漫画 4 张图都好了：
+> - 第 1 格：[图 1 URL]
+> - 第 2 格：[图 2 URL]
+> - 第 3 格：[图 3 URL]
+> - 第 4 格：[图 4 URL]
+
+**还在生成 (`isAllDone: false, summary.generating > 0`)**：
+> ⏳ 进度 2/4，还有 2 张在生成中。已完成：
+> - 第 1 格：[URL]
+> - 第 2 格：[URL]
+>
+> 大概 60 秒后再问我，或者你可以让我等到全部好了再告诉你（`--wait` 模式）。
+
+**部分失败 (`summary.failed > 0`)**：
+> ⚠️ 4 张里有 1 张失败（第 3 格：图像服务超时）。其他 3 张：
+> - 第 1 格：[URL]  / 第 2 格：[URL] / 第 4 格：[URL]
+>
+> 失败的那张可以用 `render_work.py` 重试。
+
+**完全失败 (`status: failed`)**：
+> ❌ 漫画生成失败：{errorMessage}
+> workId 留着，可以 `render_work` 重试，或重新 `create_prompt` 跑一次。
+
+### 关键铁律
+
+1. **永远报告 N/M 进度**（"2/4 已完成"），不要只说"图好了"
+2. **永远列出所有已完成 URL**（不要只给第一张）
+3. **没完成时永远给下一步建议**（多久再查 / 用 --wait / 用 render_work 重试）
+4. **`check_work.py --wait` 适合用户说"等好了告诉我"** —— 脚本会轮询到全部完成自动返回
+
+---
+
 ## 用户口语指令 → Claude 该做什么（决策对照表）
 
 这张表是 Claude 解析用户口语指令的**第一参考**。用户在微信 / 龙虾对话框里说的话千差万别，
@@ -173,7 +247,8 @@ its Open Platform API (`/v1/openapi`) and includes 10 ready-to-run Python script
 | 「看下漫画风格」/「有什么治愈风」/「列下所有风格」 | `list_styles.py --category comic` |
 | 「看下配图风格」 | `list_styles.py --category article_illustration` |
 | 「看下我最近的作品」/「我之前做过什么」/「我的作品列表」 | `list_works.py` |
-| 「查一下这个 workId 的状态」+ workId | `curl GET /work/{workId}` 或用脚本 |
+| 「查一下这个 workId 的状态」/「我那个漫画好了吗」/「图出来了吗」+ workId | **必用 `check_work.py --work-id <id>`**，不要裸 GET（容易漏看后续图）|
+| 「等我那个漫画好了告诉我」+ workId | `check_work.py --work-id <id> --wait`（轮询到全部完成自动返回）|
 
 ### 创作类（漫画 — 优先用空间）
 
@@ -227,12 +302,13 @@ its Open Platform API (`/v1/openapi`) and includes 10 ready-to-run Python script
 
 ## 调用脚本（Claude 直接执行）
 
-本 skill 自带 10 个脚本，Claude 用 `python scripts/xxx.py` 直接执行，无需手写 HTTP 请求。
+本 skill 自带 11 个脚本，Claude 用 `python scripts/xxx.py` 直接执行，无需手写 HTTP 请求。
 
 | 脚本 | 端点 | 用途 | 结果字段 |
 |---|---|---|---|
 | `scripts/help.py` | — | **快速参考卡**（用户问"怎么用"时调）| Markdown 文本 |
 | `scripts/list_workspaces.py` | `GET /workspaces` | **查询「我的空间」**（漫画创作首选）| `[{id, name, scene, outputMode, ...}]` |
+| `scripts/check_work.py` | `GET /work/{id}` | **查询作品完整状态**（防漏看后续图）| `{status, summary, imageUrls, isAllDone, advice}` |
 | `scripts/create_comic.py` | `POST /comic` | 漫画生成（推荐传 `--workspace-id`）| `imageUrls[]`（每格一张）|
 | `scripts/create_article_illustration.py` | `POST /article-illustration` | 文章配图 | `imageUrls[]` |
 | `scripts/create_image.py` | `POST /image` | 自定义生图 | `imageUrl`（单张）|

@@ -27,6 +27,8 @@ HELP_TEXT = """\
 | 「看下漫画风格」/「有哪些治愈风」 | 列出可用的漫画风格 |
 | 「看下配图风格」 | 列出可用的文章配图风格 |
 | 「看下我最近的作品」/「我之前做过什么」 | 分页列出最近作品 |
+| 「我那个漫画好了吗」/「图出来了吗」/「查这个 workId」 | 完整查询作品状态（含每张图进度）|
+| 「等我那个漫画好了告诉我」 | 轮询查询直到全部图就绪 |
 
 ---
 
@@ -97,7 +99,8 @@ HELP_TEXT = """\
 
 - API Key 没填 / 失效 → 去 https://sso.aizmjx.com/home/apikey 重新领
 - 积分不足 → 同上链接充值
-- 生图超过 5 分钟没回 → 拿 workId 去 https://tutu.aizmjx.com/gallery 查
+- 生图超过 5 分钟没回 → 把 workId 给我，我用「我那个漫画好了吗」帮你查完整状态
+- 漫画只回了 1 张图 → **多格漫画是异步生图，第 1 张先回不代表全部好了**！让我用 check_work.py 查完整进度
 - 想用空间但还没建过 → 去 https://tutu.aizmjx.com/workspace 建一个（锁定常用风格）
 
 ---
@@ -108,6 +111,7 @@ HELP_TEXT = """\
 list_workspaces.py     查询「我的空间」（漫画首选入口）
 create_comic.py        漫画生成（推荐 --workspace-id）
 create_prompt.py       仅生成分镜（分步精修入口，推荐 --workspace-id）
+check_work.py          查询作品完整状态（防漏看后续图）
 update_shot.py         单格精修字幕 / 气泡 / 提示词
 render_work.py         用最新分镜续接生图
 create_article_illustration.py    文章配图
