@@ -36,7 +36,13 @@ its Open Platform API (`/v1/openapi`) and includes 5 ready-to-run Python scripts
 > 好的！请告诉我故事内容，比如："一只懒猫不想上班，看到主人准备猫罐头后立刻跳起来"。
 > 字数不限，越详细效果越好。
 >
-> 可选：几格（默认 4 格，最多 8 格）？风格偏好（治愈/趣味/职场/小林/对比/故事/育儿/条漫…）？
+> 可选：
+> - 几格（默认 4 格，最多 8 格）？
+> - 风格偏好（治愈/趣味/职场/小林/对比/故事/育儿/条漫…）？
+> - 输出形态：纯画面（默认）／画面+字幕／气泡对话／字幕+气泡？
+
+**默认走分步精修流程**——生成分镜后会先把每格的文案 / 气泡列给你确认，
+满意了再扣积分生图。如果你想"直接出图、不用看分镜"，告诉我"急"或"直接生图"即可一把梭。
 
 ### 文章配图 — 必须有文章正文（≥300 字）和张数
 用户说"帮我配图"但没给文章时：
@@ -53,6 +59,45 @@ its Open Platform API (`/v1/openapi`) and includes 5 ready-to-run Python scripts
 
 ### 用户已提供足够信息时 — 直接提交，无需再问
 用户给了完整故事 / 文章 / 提示词，直接调用 API，不要再追问非必填项。
+
+---
+
+## 🔑 最重要的决策：漫画用哪条路径？
+
+**漫画场景默认走分步精修流程**（`create_prompt.py` → 呈现分镜让用户确认 → `update_shot.py` 改 →
+`render_work.py` 生图）。这条流程能让用户在花生图积分之前先把字幕 / 气泡看一遍，
+对中文创作者非常关键——LLM 经常把金句改得平淡，提前 review 能避免出图后才发现"文案不对"。
+
+### 何时走分步精修（默认）
+
+只要用户没明确说"直接生图"，**默认就走分步精修**：
+
+```
+✓ "帮我做个漫画"
+✓ "做一个关于 XXX 的 4 格漫画"
+✓ "用这个故事生漫画"
+✓ "AI 漫画"
+```
+
+### 何时一把梭（跳过精修）
+
+只在用户明确表达"不想 review、想立刻看到图"时直接调 `create_comic.py`：
+
+```
+✗ "直接生图，不用看分镜"
+✗ "我急，一把梭"
+✗ "不需要确认/review"
+✗ "直接出图就行"
+✗ 用户已经看过分镜，要"再来一版"  → 应走 render_work 或重新 create_prompt 而不是 create_comic
+```
+
+### 其他场景
+
+| 场景 | 走法 |
+|---|---|
+| 文章配图 | 一把梭 `create_article_illustration.py`（配图无台词 review 需求） |
+| 自定义生图 | 一把梭 `create_image.py`（无 LLM 阶段，无可 review 内容） |
+| 用户已经 `create_prompt` 拿到 workId | 仅 review + `update_shot` + `render_work`，**不要**再 create_prompt 重生 |
 
 ---
 
@@ -254,36 +299,102 @@ dialogue JSON 结构（每条最多 200 字，最多 20 条）：
 
 ---
 
-## 分步精修流程（漫画专用）
+## 漫画默认流程：分步精修
 
-这是漫画场景的高级玩法。如果用户说"先看看分镜文案对不对再决定要不要生图"、
-"我想改第 3 格的台词"、"这格的字幕换一句更点睛的"，**优先走这条流程**而不是直接调 `create_comic.py`：
+这是漫画场景的**默认走法**（除非用户明确说"直接生图"）。完整流程：
 
 ```
-1) 生成提示词（不生图，仅扣 1 积分提示词费）
-   python scripts/create_prompt.py --content "故事..." --shots 4
-   ↓ 拿到 workId + shots[] = [{shotId, prompt, caption, dialogue}, ...]
+Step 1) 生成提示词（不生图，仅扣 1 积分）
+        python scripts/create_prompt.py --content "故事..." --shots 4 \
+            [--style-id 12]
+        ↓ 拿到 workId + shots[] = [{shotId, prompt, caption, dialogue}, ...]
 
-2) 把分镜内容呈现给用户 review
-   - 给用户看每格的 caption（字幕）+ dialogue（气泡）+ prompt（图像提示词概要）
-   - 询问"第 N 格 X 字段要不要改？"
+Step 2) 用下方「分镜呈现模板」把所有格列给用户看
+        ↓
 
-3) 用户提了修改意见，调 update_shot.py 落库（不消耗积分）
-   python scripts/update_shot.py --shot-id 8521 \
-       --caption "新字幕" \
-       --dialogue '[{"role":"猫","text":"喵！","direction":"右"}]'
-   ↓ 仅这一格被改，其他格不受影响
+Step 3) ⏸️ 等用户回应（关键！绝不要自动 render）
+        ↓
 
-4) 全部满意后调 render_work.py 用精修后的分镜走生图（扣 shotCount × 2 积分）
-   python scripts/render_work.py --work-id <workId>
-   ↓ 自动轮询到 completed/failed/timeout，输出 imageUrls[]
+Step 4) 按用户回应分流：
+        - 改单格 → update_shot.py → 回 Step 2 重新呈现该格
+        - 重新生成全部 → create_prompt.py 重跑 → 回 Step 2
+        - 确认满意 → Step 5
+        - 终止 → 告诉用户当前 workId 可以稍后再继续
+        ↓
+
+Step 5) 生图（扣 shotCount × 2 积分）
+        python scripts/render_work.py --work-id <workId>
+        ↓ 默认自动轮询到完成，返回 imageUrls[]
 ```
 
-**关键**：第 4 步用 `render_work.py` **不会重新走 LLM**——它读 work 当前最新的 `shots[].finalPrompt`
-（已含你的精修）直接派发图像。整个流程精修内容零丢失，全程在脚本里完成，无需前端介入。
+### 分镜呈现模板
 
-**积分账单**：1 积分（提示词）+ N×2 积分（生图）= 漫画 4 格 9 积分；跟直接调 `create_comic.py` 一样，
-精修是免费动作。
+`create_prompt.py` 跑完后，**用以下 Markdown 格式**把所有格列给用户：
+
+```markdown
+我已经生成了 4 格分镜，请确认每格的文案：
+
+📍 **第 1 格** （shotId: 8521）
+- 字幕：今天我要做饭！
+- 气泡：（无）
+- 提示词：a chibi cat in a cozy kitchen, anime style, holding apron...
+
+📍 **第 2 格** （shotId: 8522）
+- 字幕：（无）
+- 气泡：[猫] 怎么什么都没有！
+- 提示词：cat opening fridge, surprised expression...
+
+📍 **第 3 格** ...
+
+📍 **第 4 格** ...
+
+---
+**请告诉我**：哪几格要改？格式可以是：
+- "第 2 格字幕改成 XXX"
+- "第 3 格气泡换成 [猫] AAA、[狗] BBB"
+- "第 1 格提示词加一句 'cinematic lighting'"
+- 全部满意请说 **"开始生图"**（会扣 8 积分跑出 4 张图）
+```
+
+呈现规则：
+- 字幕 / 气泡为空时显示"（无）"，不要省略整行
+- 气泡多条时用 `[role] text` 格式逐条列出，role 为空就只写 text
+- 提示词太长（>80 字）取前 80 字 + `...`，让用户能扫眼但不被淹没
+- **每格务必带上 shotId**——下一步 update_shot 要用，用户也能引用
+
+### 用户回应解析表
+
+| 用户回应模式 | 解析行动 |
+|---|---|
+| "第 N 格字幕改成 XXX" | `update_shot.py --shot-id <N格的shotId> --caption "XXX"` |
+| "第 N 格的气泡改成 [A]XXX [B]YYY" | 解析成 dialogue JSON：`[{"role":"A","text":"XXX"},{"role":"B","text":"YYY"}]`，调 `update_shot.py --dialogue '...'` |
+| "第 N 格提示词加 / 改成 XXX" | 取原 prompt 拼接 / 替换后，`update_shot.py --prompt "..."` |
+| "第 N 格不要字幕了 / 清空字幕" | `update_shot.py --caption ""` |
+| "第 N 格清空气泡 / 不要对话" | `update_shot.py --dialogue '[]'` |
+| "重新生成全部分镜 / 全部重来" | 同样参数再调 `create_prompt.py`，告诉用户 workId 变了 |
+| "开始生图 / 确认 / 满意 / 没问题" | 调 `render_work.py --work-id <workId>` |
+| "算了不要了 / 取消" | 终止，告诉用户当前 workId（可稍后用 `render_work` 继续）|
+
+**多个修改可以并发**：用户同时说"第 1 格改字幕、第 3 格改气泡"时，**用一次 message 里并行执行**两个
+`update_shot.py` 调用（独立 shotId 不冲突），改完后**重新呈现这两格**让用户复核。
+
+### 关键约束
+
+- **Step 3 必须等用户确认**——绝不要拿到 shots 后跳过 review 直接 render
+- **改完后要重新呈现被改的格**——让用户看到改动生效（不需要重新列全部 4 格，只列改过的）
+- **render 之前再次确认**——如果用户的"确认"措辞含糊（如"嗯"），明确反问"开始生图扣 N 积分吗？"
+- **render 之后不再循环精修**——已经出图了，再改就是单格重生场景（暂未在 OpenAPI 暴露，告诉用户去前端）
+
+### 积分账单
+
+| 阶段 | 扣费 |
+|---|---|
+| Step 1 `create_prompt.py` | 1 积分 |
+| Step 4 `update_shot.py` × N 次 | 0（免费） |
+| Step 5 `render_work.py` | shotCount × 2 |
+| **合计**（漫画 4 格） | **9 积分**，跟直接 `create_comic.py` 一样 |
+
+精修是免费动作。分步精修对总积分**零增量**，纯赚 review 机会。
 
 ---
 
