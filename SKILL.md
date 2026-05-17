@@ -67,9 +67,38 @@ its Open Platform API (`/v1/openapi`) and includes 5 ready-to-run Python scripts
 
 ## 🔑 最重要的决策：漫画用哪条路径？
 
-**漫画场景默认走分步精修流程**（`create_prompt.py` → 呈现分镜让用户确认 → `update_shot.py` 改 →
-`render_work.py` 生图）。这条流程能让用户在花生图积分之前先把字幕 / 气泡看一遍，
-对中文创作者非常关键——LLM 经常把金句改得平淡，提前 review 能避免出图后才发现"文案不对"。
+### Step 0：先调 `list_workspaces.py` 看「我的空间」（默认动作）
+
+漫画场景**第一件事永远是 `list_workspaces.py`**，看用户有哪些已配置好的空间。
+
+为什么？因为**用空间创作比裸创作稳定得多**——空间锁定了一套完整参数（风格 / 比例 / 输出模式 /
+分镜数 / 留白等），一次配好长期复用。每次裸创作（传 `--style-id` + `--output-mode`）参数对得对不上
+全靠用户当场说，容易踩坑、风格不稳。
+
+**有空间的情况下**：
+
+- 用户的指令含明确风格 / 主题倾向时，按 `name` 匹配挑出最贴合的空间，传 `--workspace-id`
+  （例如用户说"用我的治愈系空间做一篇"，对应名字含"治愈"的空间）
+- 用户没指定空间时，**列出所有空间让用户挑**（不要默认拿第一个）：
+  > 你有 3 个工作空间：
+  > 1. 治愈系小红书（split / 3:4 / 4 格）
+  > 2. 趣味段子（merged / 1:1 / 4 格）
+  > 3. 知识图解（split / 9:16 / 6 格）
+  >
+  > 这次用哪个？或者告诉我"自定义"重新选风格。
+
+**没有空间的情况下**（`list_workspaces.py` 返回空数组）：
+
+提示用户去前端 <https://tutu.aizmjx.com/workspace> 建一个空间锁定常用风格；
+**临时一次性**可以走自定义创作（`--style-id` + `--output-mode`），但要主动告诉用户
+「下次记得在前端建个空间，会更稳定」。
+
+### 然后才考虑分步精修
+
+不论是空间创作还是自定义创作，**漫画场景默认走分步精修流程**（`create_prompt.py` →
+呈现分镜让用户确认 → `update_shot.py` 改 → `render_work.py` 生图）。这条流程能让用户在
+花生图积分之前先把字幕 / 气泡看一遍，对中文创作者非常关键——LLM 经常把金句改得平淡，
+提前 review 能避免出图后才发现"文案不对"。
 
 ### 何时走分步精修（默认）
 
@@ -102,30 +131,35 @@ its Open Platform API (`/v1/openapi`) and includes 5 ready-to-run Python scripts
 | 自定义生图 | 一把梭 `create_image.py`（无 LLM 阶段，无可 review 内容） |
 | 用户已经 `create_prompt` 拿到 workId | 仅 review + `update_shot` + `render_work`，**不要**再 create_prompt 重生 |
 
-### outputMode 默认不是 image_only
+### outputMode 默认是 split（带字幕条）
 
-**`create_prompt.py` / `create_comic.py` 调用时必须带 `--output-mode`，不能让脚本走默认 `image_only`**——
-那样 LLM 不会生成 caption / dialogue，分步精修阶段什么都看不到。
+**`create_prompt.py` / `create_comic.py` 的 `--output-mode` 默认值已改为 `split`**——
+这样 LLM 默认会生成 caption（字幕），分步精修阶段才有内容可 review。
 
-按所选风格的 `defaultLayout` 推导：治愈/恋爱/条漫 → `split`，趣味/职场/对比/故事/育儿/手绘 → `merged`。
+- 用 `--workspace-id` 走空间创作时，outputMode 由空间锁定（推荐）
+- 用自定义模式时，按所选风格的 `defaultLayout` 微调：治愈/恋爱/条漫 → `split`（默认），
+  趣味/职场/对比/故事/育儿/手绘 → 改成 `merged`
+- 只在用户明确说"纯画面 / 不要文字"时才传 `--output-mode image_only`
+
 详见下文「outputMode 默认推导规则」章节。
 
 ---
 
 ## 调用脚本（Claude 直接执行）
 
-本 skill 自带 8 个脚本，Claude 用 `python scripts/xxx.py` 直接执行，无需手写 HTTP 请求。
+本 skill 自带 9 个脚本，Claude 用 `python scripts/xxx.py` 直接执行，无需手写 HTTP 请求。
 
 | 脚本 | 端点 | 用途 | 结果字段 |
 |---|---|---|---|
-| `scripts/create_comic.py` | `POST /comic` | 漫画生成 | `imageUrls[]`（每格一张）|
+| `scripts/list_workspaces.py` | `GET /workspaces` | **查询「我的空间」**（漫画创作首选）| `[{id, name, scene, outputMode, ...}]` |
+| `scripts/create_comic.py` | `POST /comic` | 漫画生成（推荐传 `--workspace-id`）| `imageUrls[]`（每格一张）|
 | `scripts/create_article_illustration.py` | `POST /article-illustration` | 文章配图 | `imageUrls[]` |
 | `scripts/create_image.py` | `POST /image` | 自定义生图 | `imageUrl`（单张）|
-| `scripts/create_prompt.py` | `POST /prompt` | 仅生成分镜提示词 | `shots[].prompt` |
+| `scripts/create_prompt.py` | `POST /prompt` | 仅生成分镜提示词（推荐传 `--workspace-id`）| `shots[].prompt` |
 | `scripts/update_shot.py` | `PATCH /shot/{id}/...` | 精修单格字幕/气泡/提示词 | 修改回执 |
 | `scripts/render_work.py` | `POST /work/{id}/render` | 用当前最新分镜触发生图 | `imageUrls[]` |
 | `scripts/list_works.py` | `GET /works` | 查询作品列表 | `records[]` |
-| `scripts/list_styles.py` | `GET /styles` | 查询可用风格 | `[{id, slug, name, ...}]` |
+| `scripts/list_styles.py` | `GET /styles` | 查询可用风格 | `[{id, slug, name, defaultLayout, ...}]` |
 
 **前置要求**：Python 3.9+ 和 `pip install requests`。
 
@@ -180,20 +214,30 @@ python scripts/create_comic.py --content "故事内容"
 
 ## 各脚本参数详解
 
+### `list_workspaces.py` — 查询「我的空间」（漫画首选）
+
+```
+--api-key       API Key
+```
+
+无其他参数。返回当前 API Key 所属用户的全部工作空间，按更新时间倒序。
+**漫画创作的第一步永远是这个**，按 name 匹配挑空间。
+
 ### `create_comic.py` — 漫画生成
 
 ```
 --content       故事文案（必填，≤5000 字）
+--workspace-id  工作空间 ID（强烈推荐！锁定所有参数，长期复用更稳定）；指定后下面 4 项被忽略
 --title         标题（可选，留空 AI 自动生成）
 --shots         格数 1-8，默认 4
---ratio         画面比例，默认 1:1
---style-id      风格 ID（用 list_styles.py 查询；不填用默认风格）
---output-mode   输出模式（默认 image_only）：
-                  image_only         纯画面，无文字
-                  split              画面 + 字幕条（图下贴近原文一行）
+--ratio         画面比例，默认 1:1（仅自定义模式生效）
+--style-id      风格 ID（用 list_styles.py 查询；仅自定义模式生效）
+--output-mode   输出模式（默认 split 带字幕条；仅自定义模式生效）：
+                  image_only         纯画面，无文字（不推荐——分步精修无内容可 review）
+                  split              画面 + 字幕条（默认）
                   merged             气泡对话（角色头顶气泡）
                   split_with_bubble  字幕 + 气泡同时出（长漫场景）
---api-key       API Key（可选，优先于环境变量）
+--api-key       API Key
 ```
 
 ### `create_article_illustration.py` — 文章配图
@@ -237,26 +281,23 @@ python scripts/create_comic.py --content "故事内容"
 
 **⚠️ 注意**：结果在 `imageUrl`（单张），不在 `imageUrls[]`。
 
-### `create_prompt.py` — 仅生成提示词
+### `create_prompt.py` — 仅生成提示词（分步精修入口）
 
 ```
 --content       故事文案（必填，≤5000 字）
+--workspace-id  工作空间 ID（强烈推荐！锁定所有参数，长期复用更稳定）；指定后下面 3 项被忽略
 --title         标题（可选）
 --shots         格数 1-8，默认 4
---style-id      风格 ID
---output-mode   输出模式（影响 LLM 是否生成 caption/dialogue）：
-                  image_only         LLM 不生成任何文字（分步精修无内容可 review）
-                  split              LLM 生成 caption（画面+字幕）
-                  merged             LLM 生成 dialogue（气泡对话）
-                  split_with_bubble  LLM 同时生成 caption + dialogue
+--style-id      风格 ID（仅自定义模式生效）
+--output-mode   输出模式（默认 split 带字幕条；仅自定义模式生效）
 --api-key       API Key
 ```
 
 适合：拿提示词去别处生图 / 先看分镜再决定要不要生图。所有 shots 到 `ready`
 状态即终止，比走完整生图省时省积分。
 
-**⚠️ 分步精修流程务必带 `--output-mode`**——按风格 defaultLayout 选 `split`（caption 类）
-或 `merged`（bubble 类），否则 review 阶段没文案 / 气泡可看。
+**默认 `--output-mode=split`** 让 LLM 必生成 caption 供 review。自定义模式下，
+按风格 defaultLayout 微调：caption 类保持 split，bubble 类（趣味 / 职场等）改 `merged`。
 
 ### `list_works.py` — 查询作品
 
@@ -323,12 +364,18 @@ dialogue JSON 结构（每条最多 200 字，最多 20 条）：
 这是漫画场景的**默认走法**（除非用户明确说"直接生图"）。完整流程：
 
 ```
+Step 0) （强烈推荐）先查「我的空间」
+        python scripts/list_workspaces.py
+        ↓ 按 name 匹配挑出 workspaceId；没空间走自定义模式
+
 Step 1) 生成提示词（不生图，仅扣 1 积分）
-        ⚠️ 必须带 --output-mode，否则 LLM 不生成 caption/dialogue，Step 2 无内容可 review
+        # 推荐：空间模式
+        python scripts/create_prompt.py --workspace-id 42 --content "故事..." --shots 4
+
+        # 自定义模式：默认 --output-mode split 带字幕条
+        # 趣味/职场/对比/故事 风格请改 --output-mode merged
         python scripts/create_prompt.py --content "故事..." --shots 4 \
-            --output-mode split    # 治愈/恋爱/条漫
-            # 或 --output-mode merged   # 趣味/职场/对比/故事/育儿/手绘
-            [--style-id 12]
+            [--style-id 12] [--output-mode split|merged]
         ↓ 拿到 workId + shots[] = [{shotId, prompt, caption, dialogue}, ...]
 
 Step 2) 用下方「分镜呈现模板」把所有格列给用户看

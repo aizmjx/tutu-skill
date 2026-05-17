@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
 """SuperTuTu — 漫画生成脚本。
 
-用法:
-    python create_comic.py --content "故事内容" [--title "标题"] [--shots 4]
-                           [--ratio 1:1] [--style-id 12]
-                           [--output-mode image_only|split|merged|split_with_bubble]
-                           [--api-key ak_xxx]
+用法（推荐：用空间创作）:
+    python create_comic.py --workspace-id 42 --content "故事内容"
+
+用法（自定义创作，需明确指定风格 + 输出模式）:
+    python create_comic.py --content "故事内容" [--style-id 12] [--output-mode split]
+                           [--shots 4] [--ratio 1:1] [--title "标题"]
 
 API Key 两种传入方式（任选其一）：
     1) 命令行参数：--api-key ak_xxx
     2) 环境变量：  export SUPERTUTU_API_KEY=ak_xxx
 
+⚠️ 强烈推荐用空间创作（--workspace-id）——参数一次配好长期复用，比每次裸创作稳定。
+   先调 list_workspaces.py 查询「我的空间」，按 name 匹配挑出 workspaceId。
+   workspace 锁定时，--style-id / --ratio / --output-mode 会被忽略。
+
+⚠️ 不用空间时，默认 --output-mode split（带字幕条），让 LLM 真的生成 caption
+   供分步精修 review。要纯画面请显式 --output-mode image_only。
+
 输出（stdout，JSON 格式）：
     {"workId": "...", "title": "...", "imageUrls": [...], "status": "completed|failed|timeout"}
-
-进度日志写到 stderr，不污染管道。
 """
 from __future__ import annotations
 
@@ -32,14 +38,17 @@ VALID_OUTPUT_MODES = {"image_only", "split", "merged", "split_with_bubble"}
 def main() -> None:
     ap = argparse.ArgumentParser(description="SuperTuTu 漫画生成（提交并轮询到完成）")
     ap.add_argument("--content", required=True, help="故事文案（≤5000 字）")
+    ap.add_argument("--workspace-id", type=int, default=None,
+                    help="工作空间 ID（强烈推荐！锁定所有参数，长期复用更稳定）"
+                         "；指定后 --style-id / --ratio / --output-mode 被忽略")
     ap.add_argument("--title", default="", help="标题（可选，留空 AI 自动生成）")
     ap.add_argument("--shots", type=int, default=4, help="格数 1-8（默认 4）")
     ap.add_argument("--ratio", default="1:1", help="画面比例（默认 1:1）")
     ap.add_argument("--style-id", type=int, default=None,
                     help="风格 ID（workspace_types.id；用 list_styles.py 查询；不填用默认风格）")
-    ap.add_argument("--output-mode", default=None,
-                    help=("输出模式（可选，缺省 image_only）："
-                          "image_only=纯画面 / split=画面配文（字幕条）/ "
+    ap.add_argument("--output-mode", default="split",
+                    help=("输出模式（默认 split 带字幕条）："
+                          "image_only=纯画面 / split=画面配文 / "
                           "merged=气泡对话 / split_with_bubble=字幕+气泡同时"))
     ap.add_argument("--api-key", default=None,
                     help="API Key（优先于 SUPERTUTU_API_KEY 环境变量）")
@@ -54,16 +63,23 @@ def main() -> None:
     body: dict = {
         "content": args.content,
         "shotCount": args.shots,
-        "aspectRatio": args.ratio,
     }
     if args.title:
         body["title"] = args.title
-    if args.style_id is not None:
-        body["styleTypeId"] = args.style_id
-    if args.output_mode:
-        body["outputMode"] = args.output_mode
 
-    print("📤 提交漫画生成任务…", file=sys.stderr)
+    if args.workspace_id is not None:
+        # 空间创作：所有参数从 workspace 锁定值读取，--ratio / --style-id / --output-mode 被后端忽略
+        body["workspaceId"] = args.workspace_id
+        print(f"📤 提交漫画生成任务（用空间 {args.workspace_id}）…", file=sys.stderr)
+    else:
+        # 自定义创作：用独立参数
+        body["aspectRatio"] = args.ratio
+        if args.style_id is not None:
+            body["styleTypeId"] = args.style_id
+        if args.output_mode:
+            body["outputMode"] = args.output_mode
+        print(f"📤 提交漫画生成任务（自定义模式，outputMode={args.output_mode}）…", file=sys.stderr)
+
     data = post("/comic", body, api_key)
     work_id = data.get("workId")
     if not work_id:

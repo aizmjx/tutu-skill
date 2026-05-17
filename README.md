@@ -9,10 +9,11 @@ Enables Claude to create AI-generated comics, article illustrations, and custom 
 
 ## Features
 
-- 漫画生成 — multi-panel comic strips (`create_comic.py`)
+- **空间发现** — list "我的空间" for stable comic creation with locked parameters (`list_workspaces.py`) — **recommended entry point**
+- 漫画生成 — multi-panel comic strips, supports `--workspace-id` for locked-param creation (`create_comic.py`)
 - 文章配图 — article illustrations, 8 styles (`create_article_illustration.py`)
 - 自定义生图 — direct prompt-to-image (`create_image.py`)
-- 分镜提示词 — prompt-only, no image generation (`create_prompt.py`)
+- 分镜提示词 — prompt-only, no image generation, supports `--workspace-id` (`create_prompt.py`)
 - **分步精修** — review and edit each shot's caption / dialogue / prompt before image generation (`update_shot.py`)
 - **续接生图** — trigger image generation using the latest (edited) prompts without re-running LLM (`render_work.py`)
 - 风格发现 — list available comic / illustration styles (`list_styles.py`)
@@ -57,6 +58,7 @@ tutu-skill/
     │                                     # PATCH  /shot/{id}/dialogue
     │                                     # PUT    /shot/{id}/prompt
     ├── render_work.py                    # POST   /work/{id}/render    (resume image generation w/ edits)
+    ├── list_workspaces.py                # GET    /workspaces          (my workspaces, recommended entry)
     ├── list_styles.py                    # GET    /styles              (style discovery)
     └── list_works.py                     # GET    /works               (paginated list)
 ```

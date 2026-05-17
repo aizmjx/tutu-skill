@@ -69,6 +69,7 @@ http://localhost:10001/api/v1/openapi
 | 查询 | `GET /work/{workId}` | 查询单个作品状态（轮询用） |
 | 查询 | `GET /works` | 分页查询作品列表 |
 | 查询 | `GET /styles` | 查询可用风格列表（按大类） |
+| 查询 | `GET /workspaces` | **查询当前用户的工作空间列表（漫画创作首选）** |
 
 ---
 
@@ -82,22 +83,24 @@ LLM 自动生成各格分镜提示词，完成后**自动续接图像生成**，
 ```json
 {
   "content":     "故事文案（必填，≤5000 字）",
+  "workspaceId": 42,
   "title":       "标题（可选，留空 AI 自动生成）",
   "shotCount":   4,
   "aspectRatio": "1:1",
   "styleTypeId": 12,
-  "outputMode":  "image_only"
+  "outputMode":  "split"
 }
 ```
 
 | 字段 | 类型 | 必填 | 默认 | 说明 |
 |---|---|---|---|---|
 | `content` | string | ✓ | — | 故事文案，1-5000 字 |
+| `workspaceId` | long | | null | **强烈推荐**！传了之后下面 `aspectRatio` / `styleTypeId` / `outputMode` 一概被忽略，参数从空间锁定值读取。用 `GET /workspaces` 查询 |
 | `title` | string | | "" | 留空时 LLM 自动生成 |
 | `shotCount` | int | | 4 | 分镜格数 1-8 |
-| `aspectRatio` | string | | `1:1` | `1:1` / `3:4` / `4:3` / `16:9` / `9:16` |
-| `styleTypeId` | long | | null | 风格 ID（用 `GET /styles` 查询） |
-| `outputMode` | string | | `image_only` | 见下表 |
+| `aspectRatio` | string | | `1:1` | `1:1` / `3:4` / `4:3` / `16:9` / `9:16`（自定义模式生效）|
+| `styleTypeId` | long | | null | 风格 ID（用 `GET /styles` 查询；自定义模式生效）|
+| `outputMode` | string | | `image_only` | 见下表（自定义模式生效）|
 
 **outputMode 可选值**：
 
@@ -199,6 +202,7 @@ LLM 自动生成各格分镜提示词，完成后**自动续接图像生成**，
 ```json
 {
   "content":     "故事文案（必填，≤5000 字）",
+  "workspaceId": 42,
   "title":       "标题（可选）",
   "shotCount":   4,
   "styleTypeId": null,
@@ -207,6 +211,7 @@ LLM 自动生成各格分镜提示词，完成后**自动续接图像生成**，
 ```
 
 字段大致同 `/comic`，**不接受** `aspectRatio`（图像阶段才用）。
+`workspaceId` 同 `/comic`，传了之后 `styleTypeId` / `outputMode` 被忽略。
 
 ⚠️ **`outputMode` 在 prompt 阶段就生效** —— 决定 LLM 是否生成 caption / dialogue：
 
@@ -416,6 +421,54 @@ LLM 自动生成各格分镜提示词，完成后**自动续接图像生成**，
 
 ---
 
+### `GET /workspaces` — 查询「我的空间」列表
+
+**漫画创作的首选入口**。当前 API Key 所属用户的全部工作空间，按 `updated_at` 倒序。
+
+无查询参数（按 API Key 自动定位用户）。
+
+**响应 data**：`List<SkillWorkspaceVO>`。
+
+```json
+[
+  {
+    "id":              42,
+    "name":            "治愈系小红书",
+    "description":     "锁定治愈风 + 3:4 + 字幕",
+    "scene":           "comic",
+    "workType":        "COMIC",
+    "typeId":          12,
+    "aspectRatio":     "3:4",
+    "outputMode":      "split",
+    "shotCount":       4,
+    "whitespaceRatio": 85,
+    "updatedAt":       "2026-05-15T10:00:00"
+  }
+]
+```
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 创作接口传 `workspaceId` 用这个数字 |
+| `name` | 空间名称（用户自取），客户端可做 fuzzy 匹配 |
+| `description` | 空间简介，可空 |
+| `scene` | `comic` / `article` / `cover` / ... |
+| `workType` | `COMIC` / `ARTICLE_ILLUSTRATION` / ... |
+| `typeId` | 该空间绑定的风格类型 ID（对应 `workspace_types.id`）|
+| `aspectRatio` | 默认画面比例 |
+| `outputMode` | 默认输出模式（`split` / `merged` / `split_with_bubble` / `image_only`）|
+| `shotCount` | 默认分镜数（漫画场景）|
+| `whitespaceRatio` | 留白比例（50-95），可空 |
+| `updatedAt` | 最后更新时间，列表按此倒序 |
+
+**为什么推荐用空间创作**：空间锁定了一套完整创作参数（风格 / 比例 / 输出模式 / 分镜数 / 留白），
+一次配好长期复用，比每次裸创作（传 `styleTypeId` + `outputMode` 等独立参数）稳定得多。
+
+**空数组**意味着用户还没建过空间。建议引导用户去前端 <https://tutu.aizmjx.com/workspace>
+建一个，或临时走自定义创作。
+
+---
+
 ### `GET /styles` — 查询可用风格列表
 
 用于"风格发现"——拿到列表后客户端可让用户挑、或按 `slug` / `name` 做 fuzzy 匹配挑出 ID。
@@ -585,6 +638,8 @@ LLM 自动生成各格分镜提示词，完成后**自动续接图像生成**，
 
 | 日期 | 变更 |
 |---|---|
+| 2026-05-17 | 新增 `GET /workspaces` 端点（"我的空间"查询，漫画创作首选） |
+| 2026-05-17 | `POST /comic` / `POST /prompt` 接受 `workspaceId` 参数（空间创作，参数从空间锁定值读取） |
 | 2026-05-17 | `POST /prompt` 接受 `outputMode` 参数（分步精修场景必备，否则 LLM 不生成 caption/dialogue） |
 | 2026-05-17 | `GET /styles` 响应加 `defaultLayout` 字段（`caption` / `bubble` / `none` / null）|
 | 2026-05-17 | 新增 `POST /work/{workId}/render` 续接生图端点 |
