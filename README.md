@@ -60,5 +60,6 @@ tutu-skill/
     ├── render_work.py                    # POST   /work/{id}/render    (resume image generation w/ edits)
     ├── list_workspaces.py                # GET    /workspaces          (my workspaces, recommended entry)
     ├── list_styles.py                    # GET    /styles              (style discovery)
-    └── list_works.py                     # GET    /works               (paginated list)
+    ├── list_works.py                     # GET    /works               (paginated list)
+    └── help.py                           # —                           (quick reference card, no API key needed)
 ```

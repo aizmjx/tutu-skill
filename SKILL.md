@@ -13,7 +13,22 @@ description: >
 # SuperTuTu Creator Skill
 
 SuperTuTu is an AI creative platform for Chinese content creators. This skill calls
-its Open Platform API (`/v1/openapi`) and includes 5 ready-to-run Python scripts.
+its Open Platform API (`/v1/openapi`) and includes 10 ready-to-run Python scripts.
+
+## 用户问"帮助 / 怎么用 / 不会用"时——调 help.py
+
+当用户说出下面任何一个触发词时，**立刻调 `python scripts/help.py`**，把输出原样
+（Markdown 格式）发给用户，**不要自己重新组织语言解释**——help.py 已经做过结构化整理。
+
+触发词：
+```
+✓ "怎么用？" / "图图怎么用？" / "使用帮助" / "help" / "/help"
+✓ "不会用" / "我该怎么问？" / "你能做什么？"
+✓ "示例" / "例子" / "用法" / "快速参考"
+✓ "我想用空间生图，怎么提问？"（用户原话场景）
+```
+
+`help.py` 无需 API Key、不发网络请求，纯本地输出，对用户零成本。
 
 ## 第一步：确认 API Key
 
@@ -145,12 +160,78 @@ its Open Platform API (`/v1/openapi`) and includes 5 ready-to-run Python scripts
 
 ---
 
+## 用户口语指令 → Claude 该做什么（决策对照表）
+
+这张表是 Claude 解析用户口语指令的**第一参考**。用户在微信 / 龙虾对话框里说的话千差万别，
+但意图基本落在这几类。看到对应模式立刻按右栏动作执行。
+
+### 查询类
+
+| 用户说 | Claude 动作 |
+|---|---|
+| 「看下我的空间」/「我有什么空间」/「查我的工作空间」 | `list_workspaces.py` |
+| 「看下漫画风格」/「有什么治愈风」/「列下所有风格」 | `list_styles.py --category comic` |
+| 「看下配图风格」 | `list_styles.py --category article_illustration` |
+| 「看下我最近的作品」/「我之前做过什么」/「我的作品列表」 | `list_works.py` |
+| 「查一下这个 workId 的状态」+ workId | `curl GET /work/{workId}` 或用脚本 |
+
+### 创作类（漫画 — 优先用空间）
+
+| 用户说 | Claude 动作 |
+|---|---|
+| 「用[XX]空间帮我做漫画，故事是…」 | ① `list_workspaces` 按 name 模糊匹配 XX → ② `create_prompt --workspace-id <匹配ID> --content "…"` → 列分镜让用户确认 |
+| 「用我最常用的空间做漫画」/「随便用一个空间」 | ① `list_workspaces` → ② **不要默认拿第一个**，把列表列出来让用户挑 |
+| 「帮我做个治愈漫画，故事是…」（没提空间）| ① `list_workspaces` 查有没有名字含"治愈"/"温暖"的空间 → ② 有就用，没有走自定义模式（`--style-id <治愈风>` + `--output-mode split`） |
+| 「帮我做个 4 格趣味段子，内容…」 | 同上但默认 `--output-mode merged`（趣味类气泡形态）|
+| 「直接出图，不用看分镜」 | 跳过分步精修，直接 `create_comic.py`（一把梭）|
+
+### 创作类（其他场景）
+
+| 用户说 | Claude 动作 |
+|---|---|
+| 「给这篇文章配 N 张图」+ 文章正文 | `create_article_illustration.py --content "..." --count N` |
+| 「画一张图，描述是…」 | `create_image.py --prompt "..."` |
+| 「先帮我写个分镜脚本不要直接出图」 | `create_prompt.py` 后停在 review 阶段 |
+
+### 精修类（分步精修流程中）
+
+| 用户说 | Claude 动作 |
+|---|---|
+| 「第 N 格字幕改成 XXX」 | `update_shot.py --shot-id <N格的shotId> --caption "XXX"` |
+| 「第 N 格气泡换成 [A]XXX [B]YYY」 | 解析成 dialogue JSON：`[{"role":"A","text":"XXX"},{"role":"B","text":"YYY"}]`，调 `update_shot.py --dialogue '...'` |
+| 「第 N 格提示词加 / 改成 XXX」 | 取原 prompt 拼接 / 替换后，`update_shot.py --prompt "..."` |
+| 「第 N 格不要字幕了」/「清空字幕」 | `update_shot.py --caption ""` |
+| 「第 N 格清空气泡」/「不要对话」 | `update_shot.py --dialogue '[]'` |
+| 「重新生成全部分镜」 | 同样参数再调 `create_prompt.py`，告诉用户 workId 变了 |
+| 「开始生图」/「确认」/「满意」/「没问题」/「出图」 | `render_work.py --work-id <workId>` |
+| 「算了不要了」/「取消」 | 终止，告诉用户 workId 可稍后用 `render_work` 继续 |
+
+### 帮助类
+
+| 用户说 | Claude 动作 |
+|---|---|
+| 「怎么用？」/「图图怎么用？」/「不会用」/「示例」 | `help.py`，输出原样转发 |
+| 「能不能用空间生图？」/「空间怎么用？」 | `help.py`，并补一句"先查下你的空间"然后 `list_workspaces.py` |
+| 「我没建过空间怎么办？」 | 引导去前端 <https://tutu.aizmjx.com/workspace> 建空间，或临时走自定义模式 |
+| 「API Key 哪里来？」 | <https://sso.aizmjx.com/home/apikey> |
+
+### 模糊指令的兜底原则
+
+用户说话含糊（如「帮我整一个」「随便来一个」）时，**优先反问澄清**而不是猜：
+
+> 想做漫画 / 文章配图 / 自定义生图哪一种？故事内容是什么？
+
+不要直接调脚本编造内容——浪费积分不说，还可能错离用户意图。
+
+---
+
 ## 调用脚本（Claude 直接执行）
 
-本 skill 自带 9 个脚本，Claude 用 `python scripts/xxx.py` 直接执行，无需手写 HTTP 请求。
+本 skill 自带 10 个脚本，Claude 用 `python scripts/xxx.py` 直接执行，无需手写 HTTP 请求。
 
 | 脚本 | 端点 | 用途 | 结果字段 |
 |---|---|---|---|
+| `scripts/help.py` | — | **快速参考卡**（用户问"怎么用"时调）| Markdown 文本 |
 | `scripts/list_workspaces.py` | `GET /workspaces` | **查询「我的空间」**（漫画创作首选）| `[{id, name, scene, outputMode, ...}]` |
 | `scripts/create_comic.py` | `POST /comic` | 漫画生成（推荐传 `--workspace-id`）| `imageUrls[]`（每格一张）|
 | `scripts/create_article_illustration.py` | `POST /article-illustration` | 文章配图 | `imageUrls[]` |
