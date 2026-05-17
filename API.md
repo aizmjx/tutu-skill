@@ -201,11 +201,23 @@ LLM 自动生成各格分镜提示词，完成后**自动续接图像生成**，
   "content":     "故事文案（必填，≤5000 字）",
   "title":       "标题（可选）",
   "shotCount":   4,
-  "styleTypeId": null
+  "styleTypeId": null,
+  "outputMode":  "split"
 }
 ```
 
-字段同 `/comic`，但**不接受** `aspectRatio` / `outputMode`（这些只影响图像阶段）。
+字段大致同 `/comic`，**不接受** `aspectRatio`（图像阶段才用）。
+
+⚠️ **`outputMode` 在 prompt 阶段就生效** —— 决定 LLM 是否生成 caption / dialogue：
+
+| outputMode | LLM 行为 |
+|---|---|
+| `image_only`（默认）| 不生成字幕，不生成气泡。**分步精修阶段没东西可让用户 review** |
+| `split` | 生成 caption（画面+字幕）|
+| `merged` | 生成 dialogue（气泡对话）|
+| `split_with_bubble` | 同时生成 caption + dialogue |
+
+分步精修场景务必按所选风格的 `defaultLayout` 推 outputMode：caption → `split`，bubble → `merged`。
 
 **响应 data**：`SkillWorkStatusResponse`。
 轮询到 `shots[].status === "ready"` 表示提示词已生成，`shots[].prompt` / `caption` / `dialogue` 即可用。
@@ -425,7 +437,8 @@ LLM 自动生成各格分镜提示词，完成后**自动续接图像生成**，
     "emoji":                  "🌿",
     "styleLabel":             "温柔系",
     "tagline":                "...",
-    "recommendedAspectRatio": "1:1"
+    "recommendedAspectRatio": "1:1",
+    "defaultLayout":          "caption"
   }
 ]
 ```
@@ -439,6 +452,7 @@ LLM 自动生成各格分镜提示词，完成后**自动续接图像生成**，
 | `styleLabel` | 风格副标（如「反差金句型」） |
 | `tagline` | 一句话描述 |
 | `recommendedAspectRatio` | 推荐画面比例 |
+| `defaultLayout` | 默认输出形态，映射到创作接口的 `outputMode`：`caption` → `split` / `bubble` → `merged` / `none` → `image_only` / `null` → 未设置（客户端自决） |
 
 ---
 
@@ -571,6 +585,8 @@ LLM 自动生成各格分镜提示词，完成后**自动续接图像生成**，
 
 | 日期 | 变更 |
 |---|---|
+| 2026-05-17 | `POST /prompt` 接受 `outputMode` 参数（分步精修场景必备，否则 LLM 不生成 caption/dialogue） |
+| 2026-05-17 | `GET /styles` 响应加 `defaultLayout` 字段（`caption` / `bubble` / `none` / null）|
 | 2026-05-17 | 新增 `POST /work/{workId}/render` 续接生图端点 |
 | 2026-05-17 | 新增 `PATCH /shot/{shotId}/caption` / `PATCH /shot/{shotId}/dialogue` / `PUT /shot/{shotId}/prompt` 分镜精修端点 |
 | 2026-05-17 | `GET /work/{workId}` 响应加 `shotId` / `dialogue` / `errorMessage` 字段 |

@@ -38,11 +38,14 @@ its Open Platform API (`/v1/openapi`) and includes 5 ready-to-run Python scripts
 >
 > 可选：
 > - 几格（默认 4 格，最多 8 格）？
-> - 风格偏好（治愈/趣味/职场/小林/对比/故事/育儿/条漫…）？
-> - 输出形态：纯画面（默认）／画面+字幕／气泡对话／字幕+气泡？
+> - 风格偏好（治愈/趣味/职场/对比/故事/育儿/条漫/手绘…）？
 
 **默认走分步精修流程**——生成分镜后会先把每格的文案 / 气泡列给你确认，
 满意了再扣积分生图。如果你想"直接出图、不用看分镜"，告诉我"急"或"直接生图"即可一把梭。
+
+**输出形态（字幕 / 气泡 / 纯画面）不要主动问用户**——按所选风格的 `defaultLayout` 推导：
+治愈 / 恋爱 / 条漫 → 画面+字幕；趣味 / 职场 / 对比 / 故事 / 育儿 / 手绘 → 气泡对话。
+详见下文「outputMode 默认推导规则」。
 
 ### 文章配图 — 必须有文章正文（≥300 字）和张数
 用户说"帮我配图"但没给文章时：
@@ -98,6 +101,14 @@ its Open Platform API (`/v1/openapi`) and includes 5 ready-to-run Python scripts
 | 文章配图 | 一把梭 `create_article_illustration.py`（配图无台词 review 需求） |
 | 自定义生图 | 一把梭 `create_image.py`（无 LLM 阶段，无可 review 内容） |
 | 用户已经 `create_prompt` 拿到 workId | 仅 review + `update_shot` + `render_work`，**不要**再 create_prompt 重生 |
+
+### outputMode 默认不是 image_only
+
+**`create_prompt.py` / `create_comic.py` 调用时必须带 `--output-mode`，不能让脚本走默认 `image_only`**——
+那样 LLM 不会生成 caption / dialogue，分步精修阶段什么都看不到。
+
+按所选风格的 `defaultLayout` 推导：治愈/恋爱/条漫 → `split`，趣味/职场/对比/故事/育儿/手绘 → `merged`。
+详见下文「outputMode 默认推导规则」章节。
 
 ---
 
@@ -229,15 +240,23 @@ python scripts/create_comic.py --content "故事内容"
 ### `create_prompt.py` — 仅生成提示词
 
 ```
---content     故事文案（必填，≤5000 字）
---title       标题（可选）
---shots       格数 1-8，默认 4
---style-id    风格 ID
---api-key     API Key
+--content       故事文案（必填，≤5000 字）
+--title         标题（可选）
+--shots         格数 1-8，默认 4
+--style-id      风格 ID
+--output-mode   输出模式（影响 LLM 是否生成 caption/dialogue）：
+                  image_only         LLM 不生成任何文字（分步精修无内容可 review）
+                  split              LLM 生成 caption（画面+字幕）
+                  merged             LLM 生成 dialogue（气泡对话）
+                  split_with_bubble  LLM 同时生成 caption + dialogue
+--api-key       API Key
 ```
 
 适合：拿提示词去别处生图 / 先看分镜再决定要不要生图。所有 shots 到 `ready`
 状态即终止，比走完整生图省时省积分。
+
+**⚠️ 分步精修流程务必带 `--output-mode`**——按风格 defaultLayout 选 `split`（caption 类）
+或 `merged`（bubble 类），否则 review 阶段没文案 / 气泡可看。
 
 ### `list_works.py` — 查询作品
 
@@ -305,7 +324,10 @@ dialogue JSON 结构（每条最多 200 字，最多 20 条）：
 
 ```
 Step 1) 生成提示词（不生图，仅扣 1 积分）
+        ⚠️ 必须带 --output-mode，否则 LLM 不生成 caption/dialogue，Step 2 无内容可 review
         python scripts/create_prompt.py --content "故事..." --shots 4 \
+            --output-mode split    # 治愈/恋爱/条漫
+            # 或 --output-mode merged   # 趣味/职场/对比/故事/育儿/手绘
             [--style-id 12]
         ↓ 拿到 workId + shots[] = [{shotId, prompt, caption, dialogue}, ...]
 
@@ -414,19 +436,78 @@ python scripts/create_comic.py --style-id 12 --content "..."
 
 漫画当前已上架的风格（slug 一栏可作字符串别名匹配）：
 
-| slug | 中文名 | 适用场景 |
-|---|---|---|
-| `healing` | 治愈漫画风 | 温柔系，情感故事 |
-| `funny` | 趣味漫画风 | 反差金句，搞笑段子 |
-| `workplace` | 职场漫画风 | 职场故事，编辑卡通 |
-| `romance` | 恋爱漫画风 | 少女漫，温柔氛围 |
-| `contrast` | 对比漫画风 | 二格对比，前后反差 |
-| `story` | 故事漫画风 | 多格叙事，电影感 |
-| `parenting` | 育儿漫画风 | 亲子，温暖治愈 |
-| `webtoon` | 条漫风 | 竖版长漫 |
-| `sketchy` | 手绘 Sketchy | 手绘墨水 + 水彩 |
+| slug | 中文名 | `defaultLayout` | 推荐 `outputMode` | 适用场景 |
+|---|---|---|---|---|
+| `healing` | 治愈漫画风 | `caption` | `split` | 温柔系，情感故事，重文字共鸣 |
+| `funny` | 趣味漫画风 | `bubble` | `merged` | 反差金句，搞笑段子，多人对话 |
+| `workplace` | 职场漫画风 | `bubble` | `merged` | 职场对白，编辑卡通 |
+| `romance` | 恋爱漫画风 | `caption` | `split` | 少女漫，温柔氛围，内心独白 |
+| `contrast` | 对比漫画风 | `bubble` | `merged` | 二格对比，前后反差，吐槽 |
+| `story` | 故事漫画风 | `bubble` | `merged` | 多格叙事，电影感，角色对话 |
+| `parenting` | 育儿漫画风 | `bubble` | `merged` | 亲子日常，温暖治愈，对话感 |
+| `webtoon` | 条漫风 | `caption` | `split` | 竖版长漫，画面+旁白 |
+| `sketchy` | 手绘 Sketchy | `bubble` | `merged` | 手绘墨水+水彩，对白感 |
 
-> 上表会随后端上下架变化，**以 `list_styles.py` 实际返回为准**。
+> 上表会随后端上下架变化，**以 `list_styles.py` 实际返回为准**。`defaultLayout` 字段直接从后端
+> `workspace_types.default_layout` 透出，是 v2 接口（`f9ba1eb` 之后）才有。
+
+---
+
+## outputMode 默认推导规则
+
+**漫画场景下，用户没明确说想要什么形态时**（绝大多数情况），按以下优先级推 `outputMode`：
+
+### 推导优先级
+
+```
+1. 用户明确说"纯画面/不要文字/no text"            → image_only
+2. 用户明确说"图上字下/字幕/旁白"                 → split
+3. 用户明确说"气泡/对话/对白"                     → merged
+4. 用户明确说"字幕+气泡都要/又要旁白又要对话"     → split_with_bubble
+5. 用户给了 styleTypeId 或风格名 → 按风格 defaultLayout 推：
+     caption → split
+     bubble  → merged
+     none    → image_only
+     null    → split（兜底，因为 95% 的风格都期望有文字 review）
+6. 用户没给风格也没给输出形态                     → split（让 LLM 至少生成字幕给用户 review）
+```
+
+### 为什么默认不是 image_only
+
+`image_only`（纯画面）下 LLM **不生成** caption / dialogue —— 分步精修阶段用户就**没东西可 review**。
+治愈类故事的金句、对比类的吐槽气泡才是漫画的灵魂，必须先让 LLM 产出来交给用户审稿。
+
+只有用户明确表达"我不要任何文字、就要画面"才走 `image_only`。
+
+### 实际操作
+
+调 `create_prompt.py` 时务必带上 `--output-mode`（脚本默认就是 `image_only` 这就是坑！）。
+推荐路径：
+
+```bash
+# Step A：用户说要"治愈风" → 查列表确定 styleTypeId + defaultLayout
+python scripts/list_styles.py --category comic
+# [{"id":12, "slug":"healing", "name":"治愈漫画风", "defaultLayout":"caption", ...}, ...]
+
+# Step B：按 defaultLayout 推 outputMode（caption→split）
+python scripts/create_prompt.py --content "..." --shots 4 \
+    --style-id 12 --output-mode split
+
+# 后续 update_shot / render_work 同前
+```
+
+也可以让 Claude 自己用风格 slug 表（上一节）直接选 outputMode，跳过 list_styles 调用——
+但**线上风格定义可能变**，长期还是建议先 list 一次拿权威值。
+
+### 用户明确想要纯画面的情形
+
+```
+✗ "不要任何文字/字幕/气泡"          → --output-mode image_only
+✗ "纯画面就行/no text/不要文字"     → --output-mode image_only
+✗ "我不要 review 文案"              → 跳过分步精修走 create_comic.py 一把梭
+```
+
+注意第三种：用户不要 review 文案时，分步精修就没意义了，应直接走 `create_comic.py`。
 
 ---
 

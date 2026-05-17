@@ -4,10 +4,15 @@
 用法:
     python create_prompt.py --content "故事文案" [--title "标题"]
                             [--shots 4] [--style-id 12]
+                            [--output-mode split|merged|split_with_bubble|image_only]
                             [--api-key ak_xxx]
 
 适合"想先看 prompt 再决定要不要生图"或"拿提示词去别的图像服务"的场景。
 轮询到 shots[].status == "ready" 即终止，比走完整生图省时省积分。
+
+⚠️ 分步精修流程下务必传 --output-mode（split / merged / split_with_bubble），否则 LLM
+   按 image_only 行为不生成 caption / dialogue，review 阶段会空白。
+   按风格 defaultLayout 选：caption → split，bubble → merged。
 
 API Key 两种传入方式（任选其一）：
     1) 命令行参数：--api-key ak_xxx
@@ -34,6 +39,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _client import failure_hint, poll_until_done, post, resolve_api_key  # noqa: E402
 
+VALID_OUTPUT_MODES = {"image_only", "split", "merged", "split_with_bubble"}
+
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="SuperTuTu 仅生成分镜提示词")
@@ -41,10 +48,19 @@ def main() -> None:
     ap.add_argument("--title", default="", help="标题（可选）")
     ap.add_argument("--shots", type=int, default=4, help="格数 1-8（默认 4）")
     ap.add_argument("--style-id", type=int, default=None,
-                    help="风格 ID（workspace_types.id）")
+                    help="风格 ID（workspace_types.id；用 list_styles.py 查询）")
+    ap.add_argument("--output-mode", default=None,
+                    help=("输出模式（影响 LLM 是否生成 caption/dialogue）："
+                          "image_only=不生成文字 / split=生成 caption / "
+                          "merged=生成 dialogue / split_with_bubble=两者都生成。"
+                          "分步精修流程务必带，按风格 defaultLayout 选 split 或 merged"))
     ap.add_argument("--api-key", default=None,
                     help="API Key（优先于 SUPERTUTU_API_KEY 环境变量）")
     args = ap.parse_args()
+
+    if args.output_mode and args.output_mode not in VALID_OUTPUT_MODES:
+        sys.exit(f"❌ 无效 --output-mode '{args.output_mode}'，"
+                 f"可选：{', '.join(sorted(VALID_OUTPUT_MODES))}")
 
     api_key = resolve_api_key(args.api_key)
 
@@ -56,6 +72,8 @@ def main() -> None:
         body["title"] = args.title
     if args.style_id is not None:
         body["styleTypeId"] = args.style_id
+    if args.output_mode:
+        body["outputMode"] = args.output_mode
 
     print("📤 提交分镜提示词生成任务…", file=sys.stderr)
     data = post("/prompt", body, api_key)
